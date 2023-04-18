@@ -1,0 +1,177 @@
+%{
+    #include "variables/variable.hpp"
+    #include "assembly/assembly.hpp"
+    #include <string>
+    #include <vector>
+    //#include "value/value.hpp"
+
+    extern FILE* yyin;
+    //extern FILE* yyout;
+    extern int yylineno;
+
+    using namespace std;
+
+    int yylex(void);
+    void yyerror(string error);
+
+    Variable* variables = new Variable();
+    Assembly *assembly = new Assembly();
+    //add ready commands to the list
+    //list<command*> commands;
+    int Assemblerlineno = 0;
+    //bool proceduresPresent = false; //if procedures are present then insert jump at the start of the program
+    string currentProcedure = "null";
+    vector<string> procHeadDeclarations;
+    vector<string> procCallDeclarations;
+%}
+
+%token IDENTIFIER NUM
+%token PROCEDURE PROGRAM VAR PBEGIN END IS
+%token IF THEN ELSE ENDIF
+%token WHILE DO ENDWHILE
+%token REPEAT UNTIL
+%token READ WRITE ASSIGN
+%token '+' '-' '*' '/' '%'
+%token EQ NEQ GT LT GEQ LEQ
+%token '(' ')' ',' ';' 
+
+%code requires {
+#include <stdio.h>
+#include <iostream>
+
+
+#include "value/value.hpp"
+#include "expressions/expression.hpp"
+#include "commands/command.hpp"
+#include "commands/commands.hpp"
+#include "variables/variable.hpp"
+#include "conditions/condition.hpp"
+}
+
+%union {
+Value* value;
+std::string* str; 
+Condition* cond;
+long long num;
+Expression *expr;
+Command *cmd;   
+Commands *cmds;
+}
+
+%type <expr> expression
+%type <cmd> command
+%type <cmds> commands
+%type <cond> condition
+%type <value> value
+%type <str> IDENTIFIER
+%type <num> NUM
+
+%%
+    program_all: procedures main
+
+    procedures:
+    procedures procedure
+    |procedure
+    |%empty
+
+    procedure:
+    PROCEDURE proc_head IS VAR proc_declarations PBEGIN commands END    {assembly->addProcCode($7->getInstructions(),variables,currentProcedure); currentProcedure = "null";} 
+    |PROCEDURE proc_head IS PBEGIN commands END                          {assembly->addProcCode($5->getInstructions(),variables,currentProcedure); currentProcedure = "null";}
+
+    proc_head:
+    IDENTIFIER '(' proc_head_declarations ')'                           {variables->declareProcedure(*$1); variables->assignProcHeadVariables(*$1,procHeadDeclarations); currentProcedure = *$1; procHeadDeclarations.clear();}
+
+    proc_head_declarations:
+    proc_head_declarations ',' proc_head_declaration
+    |proc_head_declaration
+
+    proc_head_declaration:
+    IDENTIFIER                                                          {procHeadDeclarations.push_back(*$1);}                 
+
+    proc_declarations:
+    proc_declarations ',' proc_declaration
+    |proc_declaration
+
+    proc_declaration:
+    IDENTIFIER                                                          {variables->declareProcLocalVariable(currentProcedure,*$1);}
+
+    proc_head_call_declarations:
+    proc_head_call_declarations ',' proc_head_call_declaration   
+    |proc_head_call_declaration
+
+    proc_head_call_declaration:
+    IDENTIFIER                                                          {procCallDeclarations.push_back(*$1);}                 
+
+    main: 
+    PROGRAM IS VAR declarations PBEGIN commands END                     {assembly->addMain();assembly->finishCode($6->getInstructions(),variables);}
+    |PROGRAM IS PBEGIN commands END                                     {assembly->addMain();assembly->finishCode($4->getInstructions(),variables);}
+
+    declarations:
+    declarations ',' declaration     
+    |declaration                      
+
+    declaration:
+    IDENTIFIER                                                          {variables->declareVariable(*$1);} 
+
+    commands:
+    commands command                                                    {$1->addInstructions($2->generateInstructions()); $$ = $1;}
+    |command                                                            {$$ = new Commands($1->generateInstructions());}
+
+    command:
+    IDENTIFIER ASSIGN expression ';'                                    {$$ = new Assign(*$1, $3, variables,currentProcedure,yylineno);}                   
+    |IF condition THEN commands ELSE commands ENDIF                     {$$ = new If_Else($2, $4, $6,variables,currentProcedure,yylineno);}
+    |IF condition THEN commands ENDIF                                   {$$ = new If($2, $4,variables,currentProcedure,yylineno);}
+    |WHILE condition DO commands ENDWHILE                               {$$ = new While($2, $4,variables,currentProcedure);}
+    |REPEAT commands UNTIL condition ';'                                {$$ = new Repeat($4, $2,variables,currentProcedure);}
+    |IDENTIFIER '(' proc_head_call_declarations ')' ';'                 {$$ = new Call_Proc(*$1, procCallDeclarations, variables, currentProcedure); procCallDeclarations.clear();}
+    |READ IDENTIFIER ';'                                                {$$ = new Read(*$2,currentProcedure,variables);}
+    |WRITE value ';'                                                    {$$ = new Write($2, variables, currentProcedure);}
+
+    condition:
+    value EQ value                                                      {$$ = new Eq($1, $3,variables->getTempValueMemoryPosition());}                             
+    |value NEQ value                                                    {$$ = new Neq($1, $3,variables->getTempValueMemoryPosition());}
+    |value GT value                                                     {$$ = new Gt($1,$3);}
+    |value LT value                                                     {$$ = new Lt($1,$3,variables);}
+    |value GEQ value                                                    {$$ = new Geq($1,$3,variables->getTempValueMemoryPosition());}
+    |value LEQ value                                                    {$$ = new Leq($1,$3,variables->getTempValueMemoryPosition());}
+
+    expression:
+    value '+' value                                                     {$$ = new AddExpr($1, $3,variables,yylineno);}                 
+    |value '-' value                                                    {$$ = new SubExpr($1, $3, variables,yylineno);}
+    |value '*' value                                                    {$$ = new MulExpr($1, $3, variables,yylineno);}
+    |value '/' value                                                    {$$ = new DivExpr($1, $3, variables,yylineno);}
+    |value '%' value                                                    {$$ = new ModExpr($1, $3, variables,yylineno);}
+    |value                                                              {$$ = new ValueExpr($1); }
+
+    value:
+    IDENTIFIER                                                          {$$ = new VarValue(currentProcedure,*$1, variables);}
+    |NUM                                                                {$$ = new ConstValue($1);}    
+
+%%
+
+void yyerror(string error) {
+    if(variables->getErrorLine() != -1){
+        cout << "Error at line: " << variables->getErrorLine() << endl << error << endl;
+    }else{
+        cout << "Error at line: " << yylineno << endl << error << endl;
+    }
+}
+
+int main(int argc, char* argv[]) {
+    string out;
+
+    if (argv[1] != NULL && argv[2] != NULL) {
+        yyin = fopen(argv[1], "r");
+        out = string(argv[2]);
+    }
+    assembly = new Assembly(out);
+
+    try{
+        yyparse();
+    }catch(string msg) {
+        yyerror(msg);
+        return 1;
+    }
+    delete variables;
+    return 0;
+}

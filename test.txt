@@ -1,0 +1,50 @@
+GET 1 [a] [division]
+GET 2 [b]
+LOAD 2 [b - right] 
+JZERO 45 [output 0] 
+STORE 3 [copy of b]
+LOAD 1 [a-left] [JZERO 45 [output 0] ]
+STORE 4 [copy of a]
+SET 0
+STORE 5 [result]
+SET 1
+STORE 6 [powOf2]
+STORE 7 [divHelp]
+LOAD 3
+SUB 4
+JPOS 25 [a/b :: !a>=b] 
+LOAD 3
+ADD 0
+STORE 3
+LOAD 7
+ADD 0
+STORE 7
+LOAD 6
+ADD 8
+STORE 6
+JUMP 12 [see if b>a]
+LOAD 3
+SUB 4
+JPOS 34 [go to dividing half]
+LOAD 4
+SUB 3
+STORE 4
+LOAD 5
+ADD 7
+STORE 5 [later start dividing]
+LOAD 3
+HALF
+STORE 3
+LOAD 7
+HALF
+STORE 7
+LOAD 6
+SUB 8
+STORE 6
+JZERO 47 [go to output]
+JUMP 25 [start subtracting again]
+SET 0 [case result == 0]
+STORE 5
+LOAD 5 [later store]
+PUT 0
+HALT
